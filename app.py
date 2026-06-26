@@ -173,6 +173,7 @@ with st.sidebar:
         st.warning("No engine configured — LLM checks will be skipped. Deterministic checks still run.")
 
     run = st.button("▶ Run QA", type="primary", use_container_width=True)
+    st.caption("build 2026-06-26 · utf8+ascii-fallback")
 
 
 # --- File loading & column mapping --------------------------------------
