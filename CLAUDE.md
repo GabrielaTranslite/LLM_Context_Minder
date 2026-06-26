@@ -198,3 +198,12 @@ apply a rule from one language where the feature doesn't exist; style-guide sect
 language-specific. (2) Grammatical-gender rules apply ONLY in languages whose verbs/adjectives
 inflect for gender (Polish, Russian, Ukrainian); in German/English etc. raise NO gender issue.
 Fixed- vs variable-gender sub-cases kept, but both scoped to gendered languages. Compiles; imports OK.
+
+## DONE — fix: 'ascii' codec UnicodeEncodeError killing LLM checks on non-ASCII text
+Symptom: "LLM check skipped: 'ascii' codec can't encode character '—'…" on a German row.
+Cause is the RUNTIME (C/ascii locale) failing to encode non-ASCII (—, ü, ä, ł), not our logic.
+Fix in `_chat`: split out `_create()`; on UnicodeEncodeError, retry once with message content
+escaped to ASCII (backslashreplace) so the request succeeds. Tested with a mock ascii-only client:
+the call now succeeds and records tokens (no 'skipped' warning). NOTE: the escape path slightly
+degrades non-ASCII text in the prompt — the proper fix is a UTF-8 runtime (set PYTHONUTF8=1 / a
+UTF-8 locale). Ask Gabriela whether this happened locally (Windows) or on the deploy.

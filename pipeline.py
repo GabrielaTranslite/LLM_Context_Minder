@@ -767,14 +767,15 @@ def _chat(client, model: str, messages: list[dict]):
     for local servers (Ollama / LM Studio) that may not support response_format.
     Returns (text, usage) where usage = {"prompt": int, "completion": int}."""
     try:
-        resp = client.chat.completions.create(
-            model=model, messages=messages, max_tokens=900, temperature=0,
-            response_format={"type": "json_object"},
-        )
-    except Exception:
-        resp = client.chat.completions.create(
-            model=model, messages=messages, max_tokens=900, temperature=0,
-        )
+        resp = _create(client, model, messages)
+    except UnicodeEncodeError:
+        # The runtime cannot encode non-ASCII (e.g. a C/ascii locale): retry with the message
+        # content escaped to ASCII so the request still goes through.
+        safe = [
+            {"role": m["role"], "content": str(m["content"]).encode("ascii", "backslashreplace").decode("ascii")}
+            for m in messages
+        ]
+        resp = _create(client, model, safe)
     text = resp.choices[0].message.content or ""
     u = getattr(resp, "usage", None)
     usage = {
@@ -782,6 +783,22 @@ def _chat(client, model: str, messages: list[dict]):
         "completion": int(getattr(u, "completion_tokens", 0) or 0),
     }
     return text, usage
+
+
+def _create(client, model: str, messages: list[dict]):
+    """One create() call: JSON mode first, fall back without it for servers that reject it.
+    A UnicodeEncodeError is re-raised (handled by the caller), not swallowed by the fallback."""
+    try:
+        return client.chat.completions.create(
+            model=model, messages=messages, max_tokens=900, temperature=0,
+            response_format={"type": "json_object"},
+        )
+    except UnicodeEncodeError:
+        raise
+    except Exception:
+        return client.chat.completions.create(
+            model=model, messages=messages, max_tokens=900, temperature=0,
+        )
 
 
 def llm_checks(row: StringRow, ctx: dict, client, model: str):
