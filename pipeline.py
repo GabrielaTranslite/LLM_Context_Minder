@@ -55,35 +55,91 @@ class StringRow:
 # Reference asset loading (glossary + style guide)
 # ---------------------------------------------------------------------------
 
+_LANG_NORM = {
+    "polish": "PL", "pl": "PL", "pol": "PL",
+    "german": "DE", "de": "DE", "deu": "DE", "ger": "DE", "deutsch": "DE",
+    "english": "EN", "en": "EN", "eng": "EN",
+    "russian": "RU", "ru": "RU", "rus": "RU",
+    "spanish": "ES", "es": "ES", "spa": "ES",
+    "italian": "IT", "it": "IT", "ita": "IT",
+    "french": "FR", "fr": "FR", "fra": "FR", "fre": "FR",
+    "chinese": "ZH", "zh": "ZH", "korean": "KO", "ko": "KO", "kor": "KO",
+    "japanese": "JA", "ja": "JA", "jp": "JA", "jpn": "JA",
+    "portuguese": "PT-BR", "pt": "PT", "pt-br": "PT-BR", "ptbr": "PT-BR",
+    "dutch": "NL", "nl": "NL", "turkish": "TR", "tr": "TR",
+    "ukrainian": "UK", "uk": "UK", "czech": "CS", "cs": "CS",
+}
+
+
+def _norm_lang(s: str) -> str:
+    return _LANG_NORM.get((s or "").strip().lower(), (s or "").strip().upper())
+
+
 def load_glossary(csv_path: str) -> list[dict]:
-    """Return glossary rows: [{english, polish, category, notes}, ...]."""
+    """Return glossary rows: [{english, targets: {LANG: term}, category, notes}, ...].
+    Supports multiple target-language columns ('Polish Target', 'German Target', or a bare
+    language column like 'DE'). The memoQ inflection column is ignored for matching."""
     rows: list[dict] = []
     if not csv_path or not os.path.exists(csv_path):
         return rows
     with open(csv_path, encoding="utf-8-sig") as f:
-        for r in csv.DictReader(f):
-            eng = (r.get("English Source") or "").strip()
+        reader = csv.DictReader(f)
+        headers = [h for h in (reader.fieldnames or []) if h]
+
+        src_col = next((h for h in headers if "english" in h.lower() or h.strip().lower() in {"source", "src"}), None)
+        if src_col is None and headers:
+            src_col = headers[0]
+        notes_col = next((h for h in headers if h.strip().lower() == "notes"), None)
+        cat_col = next((h for h in headers if h.strip().lower() == "category"), None)
+
+        tgt_cols: dict[str, str] = {}
+        for h in headers:
+            hl = h.strip().lower()
+            if h == src_col or hl in {"notes", "category"} or "memoq" in hl or "inflection" in hl:
+                continue
+            code = None
+            if "target" in hl:
+                lang_part = re.sub(r"\btarget\b", "", hl).strip(" ()-_")
+                code = _norm_lang(lang_part) if lang_part else None
+            elif hl in _LANG_NORM:
+                code = _LANG_NORM[hl]
+            if code:
+                tgt_cols.setdefault(code, h)
+
+        for r in reader:
+            eng = (r.get(src_col) or "").strip() if src_col else ""
             if not eng:
                 continue
-            rows.append(
-                {
-                    "english": eng,
-                    "polish": (r.get("Polish Target") or "").strip(),
-                    "category": (r.get("Category") or "").strip(),
-                    "notes": (r.get("Notes") or "").strip(),
-                }
-            )
+            targets = {code: (r.get(h) or "").strip() for code, h in tgt_cols.items() if (r.get(h) or "").strip()}
+            rows.append({
+                "english": eng,
+                "targets": targets,
+                "category": (r.get(cat_col) or "").strip() if cat_col else "",
+                "notes": (r.get(notes_col) or "").strip() if notes_col else "",
+            })
     return rows
 
 
-def match_glossary(source: str, glossary: list[dict], limit: int = 12) -> list[dict]:
-    """Glossary entries whose English term appears in the source string."""
+def match_glossary(source: str, glossary: list[dict], target_lang: Optional[str] = None, limit: int = 12) -> list[dict]:
+    """Glossary entries whose English term appears in the source. When target_lang is given,
+    only entries that have a term FOR THAT LANGUAGE are returned — so a Polish-only glossary
+    is never enforced against a German (or any other) translation."""
     if not source:
         return []
     low = source.lower()
-    hits = [g for g in glossary if g["english"] and g["english"].lower() in low]
-    # longer terms first (more specific), de-duplicated
-    hits.sort(key=lambda g: -len(g["english"]))
+    code = _norm_lang(target_lang) if target_lang else None
+    hits = []
+    for g in glossary:
+        if not (g["english"] and g["english"].lower() in low):
+            continue
+        if code is not None:
+            term = g["targets"].get(code, "")
+            if not term:
+                continue  # no term for this language -> don't enforce
+        else:
+            term = next(iter(g["targets"].values()), "")
+        hits.append({"english": g["english"], "term": term, "language": code or "", "notes": g["notes"]})
+    hits.sort(key=lambda x: -len(x["english"]))
     return hits[:limit]
 
 
@@ -189,6 +245,97 @@ def referenced_sections(comment: Optional[str], sections: dict[str, str], char_b
             used += len(text)
             if used > char_budget * 2:
                 break
+    return out
+
+
+# Signal -> keywords to look for in style-guide section headings/bodies. This is matched
+# against the ACTUAL guide text (by keyword), not hard-coded section numbers, so it works
+# for any style guide that uses descriptive headings.
+_CAT_SIGNALS = {
+    "ui": ["ui", "button", "length", "label", "menu", "subtitle"],
+    "button": ["button", "ui", "length"],
+    "dialogue": ["register", "tone", "address", "forms", "dialogue", "profanity", "vocabulary", "period", "names"],
+    "item": ["description", "item", "vocabulary", "period", "full stop", "punctuation", "names"],
+    "description": ["description", "full stop", "punctuation", "vocabulary"],
+    "tooltip": ["ui", "length", "description"],
+    "skill": ["skill", "name", "description", "length"],
+    "quest": ["quest", "title", "length", "vocabulary"],
+    "title": ["title", "length", "names"],
+    "location": ["names", "place", "vocabulary", "description"],
+    "codex": ["description", "vocabulary", "names"],
+    "system": ["placeholder", "gender", "plural", "agreement"],
+    "flavor": ["vocabulary", "period", "description"],
+    "tutorial": ["placeholder", "ui"],
+}
+_TAG_SIGNALS = {
+    "[fr]": ["french", "multi-language", "language", "tag"],
+    "[ru]": ["russian", "multi-language", "language", "tag"],
+    "[de]": ["german", "multi-language", "language", "tag"],
+    "[lat]": ["latin", "multi-language", "language", "tag"],
+    "[ms]": ["gender", "mob", "tag"],
+    "[fs]": ["gender", "mob", "tag"],
+    "[u]": ["plural", "unit", "number", "count", "placeholder"],
+    "{placeholder}": ["placeholder", "tag", "special"],
+    "{gender}": ["gender", "agreement", "plural", "placeholder"],
+}
+# Non-rule sections to skip (overview / Q&A process / quick lists) — heading keywords.
+_SKIP_HEADING = ("project overview", "what to flag", "reference quick list")
+
+# Specific signals that should outweigh generic register words, so the directly-relevant
+# section (e.g. Multi-language for an [FR] tag) is not crowded out by category signals.
+_STRONG = {
+    "french", "russian", "german", "latin", "multi-language", "gender", "plural", "unit",
+    "count", "number", "mob", "placeholder", "full stop", "punctuation", "length", "button", "title",
+}
+
+
+def auto_sections(row: "StringRow", sections: dict[str, str], budget: int = 2400) -> list[str]:
+    """Automatically pick relevant style-guide sections from the string's own signals
+    (category, tags, speaker, length, ID) — no comment reference needed."""
+    if not sections:
+        return []
+    signals: set[str] = set()
+    cat = (row.category or "").lower()
+    for key, kws in _CAT_SIGNALS.items():
+        if key in cat:
+            signals.update(kws)
+    blob = f"{row.tags or ''} {row.source or ''} {row.target or ''}".lower()
+    for key, kws in _TAG_SIGNALS.items():
+        if key in blob:
+            signals.update(kws)
+    if row.speaker:
+        signals.update(["register", "tone", "address", "forms", "names", "dialogue"])
+    if row.max_length:
+        signals.update(["ui", "length", "button"])
+    sid = (row.string_id or "").lower()
+    if "desc" in sid or "description" in cat:
+        signals.update(["description", "full stop", "punctuation"])
+    if not signals:
+        return []
+
+    scored = []
+    for num, text in sections.items():
+        head = text.split("\n", 1)[0].lower()
+        if any(s in head for s in _SKIP_HEADING):
+            continue
+        body = text.lower()
+        score = 0
+        for kw in signals:
+            if kw not in body:
+                continue
+            w = 3 if kw in _STRONG else 1
+            score += (2 * w) if kw in head else w
+        if score > 0:
+            scored.append((score, num, text))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+
+    out, used = [], 0
+    for _, _, text in scored:
+        t = text if len(text) <= 1000 else text[:1000] + " …"
+        if used + len(t) > budget and out:
+            break
+        out.append(t)
+        used += len(t)
     return out
 
 
@@ -459,7 +606,42 @@ def deterministic_checks(row: StringRow) -> list[Issue]:
             )
         )
 
+    # 5. Descriptions must end with a full stop (style guide §11)
+    if _is_description(row) and not _ends_with_terminal_punct(tgt):
+        issues.append(
+            Issue(
+                "warning",
+                "punctuation",
+                "Description does not end with a full stop (style guide: descriptions end with full stops).",
+                suggestion="End the description with a period.",
+            )
+        )
+
     return issues
+
+
+def _is_description(row: StringRow) -> bool:
+    sid = (row.string_id or "").lower()
+    cat = (row.category or "").lower()
+    return "description" in cat or bool(re.search(r"(^|[_\-.])desc(\b|[_\-.]|$)", sid))
+
+
+# trailing closing quotes / brackets / parens, and trailing tags/placeholders, to look past
+_TRAIL_CLOSERS = r'[\s"\'`»«”“„’‚)\]\}>]+'
+
+
+def _ends_with_terminal_punct(tgt: str) -> bool:
+    """True if the visible text ends with sentence-ending punctuation, ignoring trailing
+    quotes/brackets and any trailing tags/placeholders like [/u] or {QUANTITY}."""
+    s = (tgt or "").rstrip()
+    if not s:
+        return True  # empty handled elsewhere; don't double-flag
+    prev = None
+    while s and s != prev:
+        prev = s
+        s = re.sub(_TRAIL_CLOSERS + r"$", "", s)
+        s = re.sub(r"(?:\[/?[A-Za-z]{1,8}\]|\{[^}]*\})+$", "", s).rstrip()
+    return bool(s) and s[-1] in ".!?…"
 
 
 # ---------------------------------------------------------------------------
@@ -468,8 +650,20 @@ def deterministic_checks(row: StringRow) -> list[Issue]:
 
 def build_context(row: StringRow, glossary: list[dict], style_sections: dict[str, str],
                   characters: Optional[list[dict]] = None) -> dict:
-    gloss_hits = match_glossary(row.source, glossary)
-    style_hits = referenced_sections(row.comment, style_sections)
+    gloss_hits = match_glossary(row.source, glossary, row.language)
+    # Comment references take priority, then auto-selected sections by the string's signals.
+    ref = referenced_sections(row.comment, style_sections)
+    auto = auto_sections(row, style_sections)
+    style_hits, seen, used = [], set(), 0
+    for s in ref + auto:
+        key = s.split("\n", 1)[0]
+        if key in seen:
+            continue
+        if used + len(s) > 3400 and style_hits:
+            break
+        seen.add(key)
+        style_hits.append(s)
+        used += len(s)
     inferred = _infer_from_id(row)
     character = match_character(row.speaker, characters or [])
     entities = match_entities(row.source, characters or [], exclude=character)
@@ -523,6 +717,9 @@ translation is an error.
 - Glossary terms must be used in the prescribed form.
 - Respect stated facts about named entities and characters — especially grammatical GENDER. \
 If an entity is male but the translation uses feminine forms (or vice versa), that is an error.
+- But when a referent's gender is VARIABLE — e.g. a player-name placeholder like \
+{character.firstName} that can be male or female — the target must be gender-NEUTRAL. Flag gendered \
+verb/adjective forms, or bracketed double forms like "zdobył(a)", as an error in that case.
 - If the translation is good, return an empty list.
 Return ONLY valid JSON: {"issues": [ ... ]}. No prose."""
 
@@ -543,8 +740,9 @@ def _build_llm_user_prompt(row: StringRow, ctx: dict) -> str:
     if ctx["inferred"]:
         lines += ["", "Inferred context:"] + [f"- {n}" for n in ctx["inferred"]]
     if ctx["glossary"]:
-        lines += ["", "Relevant glossary terms (English -> required target):"]
-        lines += [f"- {g['english']} -> {g['polish']}" + (f" ({g['notes']})" if g["notes"] else "") for g in ctx["glossary"]]
+        lines += ["", f"Relevant glossary terms — the required {row.language} form (English -> {row.language}). "
+                  "Apply ONLY to this target language:"]
+        lines += [f"- {g['english']} -> {g['term']}" + (f" ({g['notes']})" if g["notes"] else "") for g in ctx["glossary"]]
     if ctx["style_sections"]:
         lines += ["", "Relevant style-guide sections:"]
         lines += [s for s in ctx["style_sections"]]
@@ -552,7 +750,7 @@ def _build_llm_user_prompt(row: StringRow, ctx: dict) -> str:
         ch = ctx["character"]
         lines += ["", f"Speaker profile — {ch['name']} (the translation must match this voice):", ch["voice"]]
     if ctx.get("entities"):
-        lines += ["", "Named entities mentioned in the source — respect these facts "
+        lines += ["", "Named entities mentioned in the source \u2014 respect these facts "
                   "(including grammatical gender agreement in the target language):"]
         lines += [f"- {e['name']}: {e['voice'][:280]}" for e in ctx["entities"]]
     return "\n".join(lines)

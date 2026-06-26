@@ -140,3 +140,52 @@ Note: a building block already exists — the "Translation columns to check" mul
   clone/venv/install/run, usage, input format, models/keys, Streamlit deploy, layout, limitations.
 - Remaining for submission (Gabriela): test dataset (tonight), Streamlit deploy (tonight),
   video (tomorrow), submission form. Optional: 2-min pitch, swap real logo PNG.
+
+## DONE — fix: glossary enforced against wrong language
+Bug (found in DE testing): the model demanded Polish glossary terms in the German translation,
+because the glossary was injected as "required target" regardless of the row's language.
+Fix: glossary is now language-aware. `load_glossary` reads multiple target-language columns
+('Polish Target', 'German Target', or a bare 'DE' column; memoQ inflection column ignored) into
+`targets: {LANG: term}`. `match_glossary(source, glossary, target_lang)` returns only terms that
+exist FOR THAT LANGUAGE — so a Polish-only glossary yields nothing for DE and is never enforced
+there. Prompt labels the block "required {LANG} form … apply ONLY to this target language".
+No glossary edits needed; to enable DE term-checking later, add a 'German Target' column with terms.
+Tested: PL gets terms (Resolve→Hart ducha), DE gets none; demo regression still 5 errors.
+
+## DONE — description full-stop check + glossary "Pani Marianne" fix
+- Glossary: added row "Pani Marianne -> panienka Marianna" (PL) in 05_glossary.csv (the literal
+  term wasn't there before; the Marianne row reads "Marianne / Marianna"). Now the tool prescribes
+  the correct salon address form.
+- New deterministic check #5: descriptions must end with a full stop (style guide §11). A string is
+  a "description" when its ID contains 'desc' or its Category contains 'description'. `_ends_with_
+  terminal_punct` looks past trailing quotes/brackets and trailing tags/placeholders ([/u], {x}),
+  then requires the last visible char to be . ! ? or …. Implemented deterministically because the
+  rule is global and the LLM only ever sees style-guide sections a string's comment references —
+  so a non-referenced rule never reached the model (that's why it was missed in testing).
+- Tested on Test_strings.xlsx: flags skill_horsemanship_desc (PL, no period); does NOT false-flag
+  endings like "…[/u].", "…S.”.", "?", "!". NOTE: only ONE description in Test_strings actually
+  lacks a period — if a 2nd was intended, it's likely a Location codex / Flavor text entry (not an
+  'desc'/'description' string), so confirm and we can widen the rule.
+
+## DONE — auto style-guide retrieval (no comment reference needed)
+Fixes the real flaw: comments never cite the style guide in production, so the LLM never saw most
+rules. `auto_sections(row, sections)` now selects relevant style-guide sections from the string's
+OWN signals — category, tags, speaker, max length, ID — by matching keywords against the actual
+section headings/bodies (NOT hard-coded section numbers, so it generalises to any guide). Specific
+signals (tags, gender, plural, length, language) are weighted higher (_STRONG) so the directly-
+relevant section wins over generic register sections. build_context merges comment-referenced
+sections (priority) + auto, deduped, capped ~3400 chars (~500 tokens/call). Non-rule sections
+(overview / Q&A / quick list) skipped. Tested (no comments): Item desc → §11 (+§8/§10), Dialogue+
+speaker → §3/§4, [FR] → §6 first, {gender} → §9.2/§9.3, UI → §10. Comment "§6" still pulls §6 first.
+Embeddings RAG remains the roadmap/pitch upgrade. Demo regression still 5 errors.
+
+## DONE — gender-neutral guidance for {character.firstName} (fix unrealistic gendered-verb rule)
+The protagonist can be male or female, so gendered past-tense verbs ('poprawił/poprawiła',
+'zdobył(a)') are unrealistic for strings with {character.firstName}. Rewrote style guide §9.2:
+such strings must be GENDER-NEUTRAL — use present tense (PL 3rd-person present isn't gendered:
+'zdobywa', 'doskonali') or nominal phrasing; bracketed double forms never ship. Added LLM_SYSTEM
+clause: when a referent's gender is variable (player-name placeholder), require a neutral form and
+flag gendered/'(a)' forms as errors. Fixed the misleading comments on system_companion_levelup &
+system_skill_increased in 06_strings_to_translate.xlsx. Test_strings.xlsx was locked (open) — same
+two comments still to update there once closed. (The demo PL translations were already neutral:
+'zyskuje', 'szlifuje'.)

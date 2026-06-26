@@ -547,7 +547,7 @@ if results:
                     if ctx["glossary"]:
                         st.markdown("**Glossary matches**")
                         for g in ctx["glossary"]:
-                            st.markdown(f"- {g['english']} → {g['polish']}")
+                            st.markdown(f"- {g['english']} → {g['term']}")
                     if ctx["style_sections"]:
                         st.markdown("**Style-guide sections pulled**")
                         for s in ctx["style_sections"]:
