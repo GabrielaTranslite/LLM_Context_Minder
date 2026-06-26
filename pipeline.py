@@ -715,11 +715,17 @@ Rules:
 - A comment is binding. If it says "question form, NOT a button label", a button-style \
 translation is an error.
 - Glossary terms must be used in the prescribed form.
-- Respect stated facts about named entities and characters — especially grammatical GENDER. \
-If an entity is male but the translation uses feminine forms (or vice versa), that is an error.
-- But when a referent's gender is VARIABLE — e.g. a player-name placeholder like \
-{character.firstName} that can be male or female — the target must be gender-NEUTRAL. Flag gendered \
-verb/adjective forms, or bracketed double forms like "zdobył(a)", as an error in that case.
+- Judge every translation by the grammar of ITS OWN target language. NEVER apply a rule from one \
+language to another where the grammatical feature does not exist. Style-guide sections may be written \
+for one language (e.g. Polish); apply such language-specific rules only to that language.
+- Grammatical GENDER rules apply ONLY in target languages whose verbs/adjectives inflect for gender \
+(e.g. Polish, Russian, Ukrainian). In German, English, etc. past-tense verbs and participles are NOT \
+gendered — do NOT raise any gender issue there.
+  - Fixed-gender referent (in a gendered language): if a named entity is male but the translation uses \
+feminine forms (or vice versa), that is an error.
+  - Variable-gender referent (in a gendered language): a player-name placeholder like \
+{character.firstName} can be male or female, so the form must be gender-NEUTRAL — flag a gendered verb/\
+adjective or a bracketed "(a)" form. In a non-gendered language (German/English) this is a non-issue.
 - If the translation is good, return an empty list.
 Return ONLY valid JSON: {"issues": [ ... ]}. No prose."""
 

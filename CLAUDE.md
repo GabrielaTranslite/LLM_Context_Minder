@@ -189,3 +189,12 @@ flag gendered/'(a)' forms as errors. Fixed the misleading comments on system_com
 system_skill_increased in 06_strings_to_translate.xlsx. Test_strings.xlsx was locked (open) — same
 two comments still to update there once closed. (The demo PL translations were already neutral:
 'zyskuje', 'szlifuje'.)
+
+## DONE — gender rules scoped by target language (fix DE false positive)
+The gender-neutral rule (from PL §9.2) was being applied to German, flagging 'erlernt' as a
+"gendered past-tense verb" — false, German participles aren't gendered. Rewrote the LLM_SYSTEM
+gender rules to be language-aware: (1) judge each translation by ITS OWN target language; never
+apply a rule from one language where the feature doesn't exist; style-guide sections may be
+language-specific. (2) Grammatical-gender rules apply ONLY in languages whose verbs/adjectives
+inflect for gender (Polish, Russian, Ukrainian); in German/English etc. raise NO gender issue.
+Fixed- vs variable-gender sub-cases kept, but both scoped to gendered languages. Compiles; imports OK.

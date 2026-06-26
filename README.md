@@ -118,13 +118,6 @@ separate target language in one pass.
   app on your own machine** — it can't reach `localhost` from a hosted deployment.
 - **No engine:** the deterministic checks still run.
 
-## Deploy (Streamlit Community Cloud)
-
-Push the repo to GitHub, then on [share.streamlit.io](https://share.streamlit.io) connect the repo
-and point it at `app.py`. The public app URL is what you share. The app runs **without an owner key**
-by default (deterministic checks + "paste your own key" for LLM checks), so hosting costs you nothing.
-If you ever want server-side LLM checks, add `OPENAI_API_KEY` in the app's **Secrets** (and set a
-spending limit on the key).
 
 ## Project layout
 
