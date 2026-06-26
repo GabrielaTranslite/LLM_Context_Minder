@@ -14,6 +14,16 @@ from dotenv import load_dotenv
 
 import pipeline as P
 
+# Force a UTF-8 locale so non-ASCII text (—, ü, ł, …) doesn't break outgoing API requests on
+# environments that default to a C/ascii locale (e.g. some Streamlit Cloud containers).
+import locale as _locale
+for _loc in ("C.UTF-8", "en_US.UTF-8", "C.utf8"):
+    try:
+        _locale.setlocale(_locale.LC_ALL, _loc)
+        break
+    except _locale.Error:
+        continue
+
 load_dotenv()
 
 
